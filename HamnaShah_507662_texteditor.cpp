@@ -1,107 +1,86 @@
+#include "texteditor.h"
 #include <iostream>
+#include <list>
+#include <map>
 #include <string>
-using namespace std;
 
-// Node for each character
-struct CharNode {
-    char ch;
-    CharNode* prev;
-    CharNode* next;
-    CharNode(char c) : ch(c), prev(NULL), next(NULL) {}
-};
-
-class TextEditor {
-private:
-    CharNode* head;   // start of text
-    CharNode* tail;   // end of text
-    CharNode* cursor; // cursor points to position (before cursor char)
-
+// Internal implementation class using linked list for text and cursor
+class TextEditorImpl {
 public:
-    TextEditor() {
-        head = tail = NULL;
-        cursor = NULL; // initially before any character
+    std::list<char> text;
+    std::list<char>::iterator cursor;
+
+    TextEditorImpl() {
+        cursor = text.begin();
     }
 
-    // Insert a character at cursor position
     void insertChar(char c) {
-        CharNode* newNode = new CharNode(c);
-
-        if (head == NULL) {
-            // empty text
-            head = tail = newNode;
-            cursor = newNode; // cursor after this char
-        } else if (cursor == NULL) {
-            // insert at beginning
-            newNode->next = head;
-            head->prev = newNode;
-            head = newNode;
-            cursor = newNode; 
-        } else {
-            // insert after cursor
-            newNode->prev = cursor;
-            newNode->next = cursor->next;
-            if (cursor->next != NULL) cursor->next->prev = newNode;
-            cursor->next = newNode;
-            if (cursor == tail) tail = newNode;
-            cursor = newNode; // move cursor after new char
-        }
-        display("After insert '" + string(1, c) + "': ");
+        text.insert(cursor, c);
     }
 
-    // Delete character before cursor
     void deleteChar() {
-        if (cursor == NULL) {
-            // nothing to delete (at start)
-            display("After delete: ");
-            return;
+        if (cursor != text.begin()) {
+            auto temp = cursor;
+            --temp;
+            text.erase(temp);
         }
-
-        CharNode* toDelete = cursor;
-
-        if (toDelete->prev != NULL)
-            toDelete->prev->next = toDelete->next;
-        else
-            head = toDelete->next;
-
-        if (toDelete->next != NULL)
-            toDelete->next->prev = toDelete->prev;
-        else
-            tail = toDelete->prev;
-
-        cursor = toDelete->prev; // move cursor left
-        delete toDelete;
-
-        display("After delete: ");
     }
 
-    // Move cursor left
     void moveLeft() {
-        if (cursor != NULL) cursor = cursor->prev;
-        display("After move left: ");
+        if (cursor != text.begin()) --cursor;
     }
 
-    // Move cursor right
     void moveRight() {
-        if (cursor == NULL && head != NULL) {
-            cursor = head; // move right from start
-        } else if (cursor != NULL && cursor->next != NULL) {
-            cursor = cursor->next;
-        }
-        display("After move right: ");
+        if (cursor != text.end()) ++cursor;
     }
 
-    // Display text with cursor as '|'
-    void display(string msg = "") {
-        cout << msg;
-        CharNode* temp = head;
-        while (temp != NULL) {
-            if (temp == cursor) cout << temp->ch << "|";
-            else cout << temp->ch;
-            temp = temp->next;
+    std::string getTextWithCursor() const {
+        std::string result;
+        for (auto it = text.begin(); it != text.end(); ++it) {
+            if (it == cursor) result += '|';
+            result += *it;
         }
-        if (cursor == NULL) cout << "|"; // cursor at start
-        else if (cursor == tail) cout << "|"; // cursor after last
-        cout << endl;
+        if (cursor == text.end()) result += '|';
+        return result;
     }
 };
 
+// Global mapping of TextEditor objects to their internal data
+static std::map<const TextEditor*, TextEditorImpl> implMap;
+
+// Define all virtual methods of TextEditor to call the internal implementation
+void TextEditor::insertChar(char c) { implMap[this].insertChar(c); }
+void TextEditor::deleteChar() { implMap[this].deleteChar(); }
+void TextEditor::moveLeft() { implMap[this].moveLeft(); }
+void TextEditor::moveRight() { implMap[this].moveRight(); }
+std::string TextEditor::getTextWithCursor() const { return implMap.at(this).getTextWithCursor(); }
+
+
+int main() {
+    TextEditor ed;
+
+    ed.insertChar('a');
+    std::cout << "After insert 'a': " << ed.getTextWithCursor() << "\n";
+
+    ed.insertChar('b');
+    std::cout << "After insert 'b': " << ed.getTextWithCursor() << "\n";
+
+    ed.moveLeft();
+    std::cout << "After move left: " << ed.getTextWithCursor() << "\n";
+
+    ed.insertChar('c');
+    std::cout << "After insert 'c': " << ed.getTextWithCursor() << "\n";
+
+    ed.deleteChar();
+    std::cout << "After delete: " << ed.getTextWithCursor() << "\n";
+
+    ed.moveLeft();
+    ed.moveLeft();
+    std::cout << "After move left twice: " << ed.getTextWithCursor() << "\n";
+
+    ed.moveRight();
+    ed.moveRight();
+    std::cout << "After move right twice: " << ed.getTextWithCursor() << "\n";
+
+    return 0;
+}

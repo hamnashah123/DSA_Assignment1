@@ -1,147 +1,329 @@
-#include <iostream>
-#include <vector>
-#include <string>
+#include "uno.h"
 #include <algorithm>
+#include <deque>
+#include <map>        
 #include <random>
+#include <sstream>
+#include <stdexcept>
+#include <iostream>
+
 using namespace std;
 
-struct Card {
-    string color; // Red, Green, Blue, Yellow
-    string value; // 0-9, Skip, Reverse, Draw Two
+
+//A single card in UNO (color + value).
+
+struct CardImpl {
+    string color;  //"Red", "Green", "Blue", "Yellow"
+    string value;  //"0"-"9", "Skip", "Reverse", "Draw Two"
 };
 
-class UNOGame {
-private:
-    vector<Card> deck;
-    vector<vector<Card>> players;
-    vector<Card> discard;
-    int currentPlayer;
-    bool clockwise;
-    int numPlayers;
+//Hidden state for each game instance
+struct UNOImpl {
+    int numPlayers;                  //total players
+    int currentPlayer;               //whose turn
+    bool clockwise;                  //turn direction
+    deque<CardImpl> deck;            //draw pile
+    vector<CardImpl> discard;        //discard pile
+    vector<vector<CardImpl>> hands;  //each player's hand
+};
 
-    // Utility: create deck
-    void createDeck() {
-        string colors[] = {"Red", "Green", "Blue", "Yellow"};
-        // Numbers
-        for (string c : colors) {
-            deck.push_back({c, "0"}); // one zero
-            for (int i = 1; i <= 9; i++) {
-                deck.push_back({c, to_string(i)});
-                deck.push_back({c, to_string(i)});
+//Global storage: each UNOGame* with its implementation
+static map<const UNOGame*, UNOImpl*> gameStorage;
+
+//Retrieve internal storage safely
+static UNOImpl* getImpl(const UNOGame* g) {
+    if (gameStorage.find(g) == gameStorage.end()) {
+        throw runtime_error("UNOGame not initialized properly.");
+    }
+    return gameStorage[g];
+}
+
+
+UNOGame::UNOGame(int numPlayers) {
+    if (numPlayers < 2 || numPlayers > 4)
+        throw invalid_argument("Players must be between 2 and 4");
+
+    UNOImpl* impl = new UNOImpl();
+    impl->numPlayers = numPlayers;
+    impl->currentPlayer = 0;
+    impl->clockwise = true;
+    impl->hands.resize(numPlayers);
+
+    //Attach impl to this game instance
+    gameStorage[this] = impl;
+}
+
+void UNOGame::initialize() {
+    UNOImpl* impl = getImpl(this);
+
+    //Reset hands and discard for re-initialization safety
+    for (auto& h : impl->hands) h.clear();
+    impl->discard.clear();
+
+    //Build deck (76 cards: 0 once per color, 1–9 + action cards twice each)
+    vector<string> colors = { "Red", "Green", "Blue", "Yellow" };
+    vector<string> values = { "0","1","2","3","4","5","6","7","8","9",
+                              "Skip","Reverse","Draw Two" };
+
+    impl->deck.clear();
+    for (auto& c : colors) {
+        impl->deck.push_back({ c, "0" }); //one zero per color
+        for (int rep = 0; rep < 2; rep++) {
+            for (size_t i = 1; i < values.size(); i++) {
+                impl->deck.push_back({ c, values[i] });
             }
-            // Action cards
-            for (int k = 0; k < 2; k++) {
-                deck.push_back({c, "Skip"});
-                deck.push_back({c, "Reverse"});
-                deck.push_back({c, "Draw Two"});
+        }
+    }
+
+    //Shuffle deck with fixed seed (reproducible results)
+    mt19937 rng(1234);
+    shuffle(impl->deck.begin(), impl->deck.end(), rng);
+
+    //Deal 7 cards per player
+    for (int i = 0; i < 7; i++) {
+        for (int p = 0; p < impl->numPlayers; p++) {
+            if (impl->deck.empty()) break; //deck safety
+            impl->hands[p].push_back(impl->deck.front());
+            impl->deck.pop_front();
+        }
+    }
+
+    //Ensure there is a valid starting discard card
+    while (!impl->deck.empty()) {
+        CardImpl starter = impl->deck.front();
+        impl->deck.pop_front();
+
+        //Avoid action cards as first discard to prevent weird starts
+        if (starter.value != "Skip" && starter.value != "Reverse" && starter.value != "Draw Two") {
+            impl->discard.push_back(starter);
+            break;
+        }
+        else {
+            //put action card back at bottom
+            impl->deck.push_back(starter);
+        }
+    }
+
+    if (impl->discard.empty())
+        throw runtime_error("Failed to initialize discard pile.");
+}
+
+bool UNOGame::isGameOver() const {
+    UNOImpl* impl = getImpl(this);
+
+    //Game ends if any player has no cards left
+    for (auto& h : impl->hands) {
+        if (h.empty()) return true;
+    }
+
+    //Stalemate: deck is empty and no one can play
+    if (impl->deck.empty()) {
+        //Check if at least one player has a legal move
+        CardImpl top = impl->discard.back();
+        bool playableExists = false;
+        for (auto& h : impl->hands) {
+            for (auto& c : h) {
+                if (c.color == top.color || c.value == top.value) {
+                    playableExists = true;
+                    break;
+                }
+            }
+            if (playableExists) break;
+        }
+        return !playableExists;
+    }
+    return false;
+}
+
+int UNOGame::getWinner() const {
+    UNOImpl* impl = getImpl(this);
+    for (int i = 0; i < impl->numPlayers; i++) {
+        if (impl->hands[i].empty()) return i;
+    }
+    return -1; //no winner yet
+}
+
+
+
+//Card can be played if color or value matches top
+static bool canPlay(const CardImpl& c, const CardImpl& top) {
+    return (c.color == top.color || c.value == top.value);
+}
+
+//Compute next player index with direction + skips
+static int nextPlayerIndex(const UNOImpl* impl, int start, int skipCount = 0) {
+    int step = impl->clockwise ? 1 : -1;
+    int idx = start;
+    for (int i = 0; i <= skipCount; i++) {
+        idx = (idx + step + impl->numPlayers) % impl->numPlayers;
+    }
+    return idx;
+}
+
+
+void UNOGame::playTurn() {
+    UNOImpl* impl = getImpl(this);
+    if (isGameOver()) return; //game already finished
+
+    CardImpl top = impl->discard.back();
+    auto& hand = impl->hands[impl->currentPlayer];
+
+    //1. Try to play a card
+    int chosen = -1;
+
+    //Priority 1: Color match
+    for (size_t i = 0; i < hand.size(); i++) {
+        if (hand[i].color == top.color) { chosen = (int)i; break; }
+    }
+    //Priority 2: Value match
+    if (chosen == -1) {
+        for (size_t i = 0; i < hand.size(); i++) {
+            if (hand[i].value == top.value) { chosen = (int)i; break; }
+        }
+    }
+    //Priority 3: Action cards (Skip > Reverse > Draw Two)
+    if (chosen == -1) {
+        for (size_t i = 0; i < hand.size(); i++) {
+            if ((hand[i].value == "Skip" || hand[i].value == "Reverse" || hand[i].value == "Draw Two")
+                && canPlay(hand[i], top)) {
+                chosen = (int)i; break;
             }
         }
     }
 
-    // Utility: check playable
-    bool isPlayable(Card card, Card top) {
-        return (card.color == top.color || card.value == top.value);
-    }
+    if (chosen != -1) {
+        //Play the chosen card
+        CardImpl played = hand[chosen];
+        impl->discard.push_back(played);
+        hand.erase(hand.begin() + chosen);
 
-public:
-    UNOGame(int n) {
-        numPlayers = n;
-        players.resize(n);
-        clockwise = true;
-        currentPlayer = 0;
-    }
-
-    void initialize() {
-        createDeck();
-        // Shuffle with fixed seed 1234
-        std::mt19937 rng(1234);
-        shuffle(deck.begin(), deck.end(), rng);
-
-        // Deal 7 cards
-        for (int i = 0; i < numPlayers; i++) {
-            for (int j = 0; j < 7; j++) {
-                players[i].push_back(deck.back());
-                deck.pop_back();
+        //Apply action card effect
+        if (played.value == "Skip") {
+            impl->currentPlayer = nextPlayerIndex(impl, impl->currentPlayer, 1);
+        }
+        else if (played.value == "Reverse") {
+            impl->clockwise = !impl->clockwise;
+            //Special rule: in 2-player game, Reverse = Skip
+            if (impl->numPlayers == 2) {
+                impl->currentPlayer = nextPlayerIndex(impl, impl->currentPlayer, 1);
+            }
+            else {
+                impl->currentPlayer = nextPlayerIndex(impl, impl->currentPlayer, 0);
             }
         }
-
-        // Start discard
-        discard.push_back(deck.back());
-        deck.pop_back();
-    }
-
-    string getState() {
-        string state = "Player " + to_string(currentPlayer) + "'s turn, Direction: ";
-        state += (clockwise ? "Clockwise" : "Counter-clockwise");
-        state += ", Top: " + discard.back().color + " " + discard.back().value;
-        state += ", Players cards: ";
-        for (int i = 0; i < numPlayers; i++) {
-            state += "P" + to_string(i) + ":" + to_string(players[i].size());
-            if (i < numPlayers - 1) state += ", ";
+        else if (played.value == "Draw Two") {
+            int victim = nextPlayerIndex(impl, impl->currentPlayer, 0);
+            for (int i = 0; i < 2 && !impl->deck.empty(); i++) {
+                impl->hands[victim].push_back(impl->deck.front());
+                impl->deck.pop_front();
+            }
+            impl->currentPlayer = nextPlayerIndex(impl, impl->currentPlayer, 1);
         }
-        return state;
-    }
-
-    bool isGameOver() {
-        for (int i = 0; i < numPlayers; i++) {
-            if (players[i].empty()) return true;
+        else {
+            impl->currentPlayer = nextPlayerIndex(impl, impl->currentPlayer, 0);
         }
-        return false;
     }
+    else {
+        
+        //2. No card → Draw one
+        if (!impl->deck.empty()) {
+            CardImpl drawn = impl->deck.front();
+            impl->deck.pop_front();
 
-    void playTurn() {
-        Card top = discard.back();
-        bool played = false;
+            if (canPlay(drawn, top)) {
+                //Immediately play drawn card
+                impl->discard.push_back(drawn);
 
-        // Try to play first matching card
-        for (int i = 0; i < players[currentPlayer].size(); i++) {
-            if (isPlayable(players[currentPlayer][i], top)) {
-                Card chosen = players[currentPlayer][i];
-                discard.push_back(chosen);
-                players[currentPlayer].erase(players[currentPlayer].begin() + i);
-                played = true;
-
-                // Action effects
-                if (chosen.value == "Skip") {
-                    advanceTurn();
-                } else if (chosen.value == "Reverse") {
-                    clockwise = !clockwise;
-                } else if (chosen.value == "Draw Two") {
-                    int next = getNextPlayer();
-                    for (int k = 0; k < 2 && !deck.empty(); k++) {
-                        players[next].push_back(deck.back());
-                        deck.pop_back();
+                if (drawn.value == "Skip") {
+                    impl->currentPlayer = nextPlayerIndex(impl, impl->currentPlayer, 1);
+                }
+                else if (drawn.value == "Reverse") {
+                    impl->clockwise = !impl->clockwise;
+                    if (impl->numPlayers == 2) {
+                        impl->currentPlayer = nextPlayerIndex(impl, impl->currentPlayer, 1);
                     }
-                    advanceTurn();
+                    else {
+                        impl->currentPlayer = nextPlayerIndex(impl, impl->currentPlayer, 0);
+                    }
                 }
-                break;
+                else if (drawn.value == "Draw Two") {
+                    int victim = nextPlayerIndex(impl, impl->currentPlayer, 0);
+                    for (int i = 0; i < 2 && !impl->deck.empty(); i++) {
+                        impl->hands[victim].push_back(impl->deck.front());
+                        impl->deck.pop_front();
+                    }
+                    impl->currentPlayer = nextPlayerIndex(impl, impl->currentPlayer, 1);
+                }
+                else {
+                    impl->currentPlayer = nextPlayerIndex(impl, impl->currentPlayer, 0);
+                }
+            }
+            else {
+                // Keep the drawn card
+                hand.push_back(drawn);
+                impl->currentPlayer = nextPlayerIndex(impl, impl->currentPlayer, 0);
             }
         }
+        else {
+            //Deck empty then just skip turn
+            impl->currentPlayer = nextPlayerIndex(impl, impl->currentPlayer, 0);
+        }
+    }
+}
 
-        // If not played → draw
-        if (!played) {
-            if (!deck.empty()) {
-                Card newCard = deck.back();
-                deck.pop_back();
-                if (isPlayable(newCard, top)) {
-                    discard.push_back(newCard);
-                } else {
-                    players[currentPlayer].push_back(newCard);
-                }
-            }
+string UNOGame::getState() const {
+    UNOImpl* impl = getImpl(this);
+    ostringstream out;
+    string dir = impl->clockwise ? "Clockwise" : "Counter-clockwise";
+    const CardImpl& top = impl->discard.back();
+
+    out << "Player " << impl->currentPlayer
+        << "'s turn, Direction: " << dir
+        << ", Top: " << top.color << " " << top.value
+        << ", Players cards: ";
+
+    for (int p = 0; p < impl->numPlayers; p++) {
+        out << "P" << p << ":" << impl->hands[p].size();
+        if (p < impl->numPlayers - 1) out << ", ";
+    }
+    return out.str();
+}
+
+int main() {
+    try {
+        // Create a UNO game with 3 players
+        UNOGame game(3);
+
+        // Initialize the game (shuffle, deal cards, start discard)
+        game.initialize();
+
+        cout << "=== UNO Game Simulation ===\n";
+        cout << "Initial State:\n" << game.getState() << "\n\n";
+
+        int turnCount = 1;
+
+        // Play turns until someone wins or max turns reached (for safety)
+        while (!game.isGameOver() && turnCount <= 50) {
+            cout << "Turn " << turnCount << " :\n";
+            game.playTurn();
+            cout << game.getState() << "\n\n";
+
+         
         }
 
-        // Advance to next player
-        advanceTurn();
+        if (game.isGameOver()) {
+            int winner = game.getWinner();
+            if (winner != -1)
+                cout << "Player " << winner << " wins the game! \n";
+            else
+                cout << "Game ended in a stalemate — no winner.\n";
+        } else {
+            cout << "Stopped after 50 turns to prevent infinite play.\n";
+        }
+    }
+    catch (const exception &e) {
+        cerr << "Error: " << e.what() << endl;
     }
 
-private:
-    int getNextPlayer() {
-        if (clockwise) return (currentPlayer + 1) % numPlayers;
-        else return (currentPlayer - 1 + numPlayers) % numPlayers;
-    }
-
-    void advanceTurn() {
-        currentPlayer = getNextPlayer();
-    }
-};
+    return 0;
+}

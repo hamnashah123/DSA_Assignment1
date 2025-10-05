@@ -4,9 +4,6 @@
 #include <iostream>
 #include <algorithm>
 #include <functional>
-#include <iostream>
-using namespace std;
-
 
 
 
@@ -113,29 +110,31 @@ Polynomial Polynomial::derivative() const {
 }
 
 
+// #include <iostream>
+// using namespace std;
 
-int main() {
-    Polynomial p1;
-    p1.insertTerm(3, 4);
-    p1.insertTerm(2, 2);
-    p1.insertTerm(-1, 1);
-    p1.insertTerm(5, 0);
+// int main() {
+//     Polynomial p1;
+//     p1.insertTerm(3, 4);
+//     p1.insertTerm(2, 2);
+//     p1.insertTerm(-1, 1);
+//     p1.insertTerm(5, 0);
 
-    Polynomial p2;
-    p2.insertTerm(1, 4);
-    p2.insertTerm(1, 0);
+//     Polynomial p2;
+//     p2.insertTerm(1, 4);
+//     p2.insertTerm(1, 0);
 
-    Polynomial sum = p1.add(p2);
-    Polynomial p3;
-    p3.insertTerm(2, 1);
+//     Polynomial sum = p1.add(p2);
+//     Polynomial p3;
+//     p3.insertTerm(2, 1);
 
-    Polynomial prod = sum.multiply(p3);
-    Polynomial deriv = p1.derivative();
+//     Polynomial prod = sum.multiply(p3);
+//     Polynomial deriv = p1.derivative();
 
-    cout << "p1.toString(): " << p1.toString() << endl;
-    cout << "sum.toString(): " << sum.toString() << endl;
-    cout << "prod.toString(): " << prod.toString() << endl;
-    cout << "deriv.toString(): " << deriv.toString() << endl;
+//     cout << "p1.toString(): " << p1.toString() << endl;
+//     cout << "sum.toString(): " << sum.toString() << endl;
+//     cout << "prod.toString(): " << prod.toString() << endl;
+//     cout << "deriv.toString(): " << deriv.toString() << endl;
 
-    return 0;
-}
+//     return 0;
+// }

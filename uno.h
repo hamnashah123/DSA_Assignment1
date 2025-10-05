@@ -14,19 +14,19 @@ public:
     UNOGame(int numPlayers);
 
     // Shuffle and deal cards to players
-    void initialize();
+   virtual void initialize();
 
     // Play one turn of the game
-    void playTurn();
+  virtual  void playTurn();
 
     // Return true if game has a winner
-    bool isGameOver() const;
+   virtual bool isGameOver() const;
 
     // Return index of winner
-    int getWinner() const;
+   virtual int getWinner() const;
 
     // Return current state as string
-    std::string getState() const;
+   virtual std::string getState() const;
 };
 
 #endif

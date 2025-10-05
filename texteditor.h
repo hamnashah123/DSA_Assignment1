@@ -6,19 +6,19 @@
 class TextEditor {
 public:
     // Insert character at cursor
-    void insertChar(char c);
+   virtual void insertChar(char c);
 
     // Delete character before cursor
-    void deleteChar();
+   virtual void deleteChar();
 
     // Move cursor one position left
-    void moveLeft();
+   virtual void moveLeft();
 
     // Move cursor one position right
-    void moveRight();
+   virtual void moveRight();
 
     // Return string with cursor position
-    std::string getTextWithCursor() const;
+   virtual std::string getTextWithCursor() const;
 };
 
 #endif
